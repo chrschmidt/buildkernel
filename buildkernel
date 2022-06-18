@@ -1844,7 +1844,7 @@ kernel_build_pass_1() {
 
     if ((USINGMODULES==1)); then
         show "Installing modules..."
-        ${MAKE} modules_install
+        ${MAKE} INSTALL_MOD_STRIP=1 modules_install
     fi
 
     show "Installing firmware..."
