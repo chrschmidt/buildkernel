@@ -1,7 +1,7 @@
 # buildkernel
 A tool to build a secure-boot EFI stub kernel, and save it to the EFI system partition.
 
-> 18 Jun 2022: time to finally do some modifications I wanted for myself for some time.
+Work conducted on Jun 2022 to adopt it for my preferences
 
 > 31 Oct 2020: sadly, due to legal obligations arising from a recent change in my 'real world' job, I must announce I am **standing down as maintainer of this project with immediate effect**. For the meantime, I will leave the repo up (for historical interest, and it may be of use to others); however, I plan no further updates, nor will I be accepting / actioning further pull requests or bug reports from this point. Email requests for support will also have to be politely declined, so, **please treat this as an effective EOL notice**.<br><br>For further details, please see my post [here](https://forums.gentoo.org/viewtopic-p-8522963.html#8522963).<br><br>With sincere apologies, sakaki ><
 
@@ -24,7 +24,7 @@ Although **buildkernel** is targetted primarily at the use-case where the EFI sy
 
 ## Installation
 
-**buildkernel** is best installed (on Gentoo) via its ebuild, available as part of the **sakaki-tools** [overlay](https://github.com/sakaki-/sakaki-tools).
+**buildkernel** is best installed (on Gentoo) via its ebuild, available as part of the **dalabs** [overlay](https://github.com/chrschmidt/dalabs-overlay).
 Full instructions are provided as part of the [**Sakaki's EFI Install Guide**](https://wiki.gentoo.org/wiki/Sakaki's_EFI_Install_Guide) tutorial, on the Gentoo wiki.
 
 In particular, see [this section](https://wiki.gentoo.org/wiki/Sakaki's_EFI_Install_Guide/Configuring_and_Building_the_Kernel#What_the_buildkernel_Script_Does_.28Background_Reading.29) for a detailed description of what **buildkernel** does, and why.
