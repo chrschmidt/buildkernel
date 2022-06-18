@@ -1906,20 +1906,11 @@ unpack_initramfs() {
     fi
     (cd "${INITRAMFSDIR}"; cpio --extract --file="${UNCOMPRESSEDINITRAMFS}")
 }
-build_static_gpg() {
-    # gnupg not slotted unfortunately, so we do this instead
-    show "Building static gpg 1.x for use in initramfs..."
-    emerge ${VERBOSITYFLAG} "app-crypt/staticgpg"
-}
 modify_initramfs() {
     if [ -n "${LUKSKEYFILE}" ]; then
         if [ ! -x "${GPG1PATHFROM}" ]; then
-            if ((ARG_ASK==1)); then
-                continue_yn "No static gpg found, would you like to build it?"
-            else
-                show "No static gpg found, so creating one..."
-            fi
-            build_static_gpg
+            alertshow "No static gpg found, aborting"
+            cleanup_and_exit_with_code 1
         fi
         show "Copying static gpg program into initramfs..."
         cp ${VERBOSITYFLAG} "${GPG1PATHFROM}" "${GPG1PATHTO}"
