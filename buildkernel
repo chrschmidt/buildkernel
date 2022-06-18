@@ -1873,8 +1873,6 @@ create_initramfs_using_genkernel() {
     # itself; also note, we build an uncompressed ramdisk, as the kernel
     # build process will compress it on integration into the
     # unified kernel image
-    # we suppress gpg here as we don't want to add gpg v2 which is installed,
-    # but rather our static gpg v1, which will be inserted into the initramfs
     local PLYMOUTH_OPTS=""
     if [ -n "${PLYMOUTHTHEME}" ]; then
         PLYMOUTH_OPTS="--plymouth --plymouth-theme=${PLYMOUTHTHEME}"
@@ -1887,7 +1885,10 @@ create_initramfs_using_genkernel() {
     if ((DISABLE_LVM==0)); then
         GENKERNEL_OPTS+="--lvm "
     fi
-    GENKERNEL_OPTS+="--gpg ${POSTCLEAR_FLAG} --busybox "
+    if [ -n "${LUKSKEYFILE}" ]; then
+        GENKERNEL_OPTS+="--gpg "
+    fi
+    GENKERNEL_OPTS+="${POSTCLEAR_FLAG} --busybox "
     GENKERNEL_OPTS+="--kernel-config=\"$(basename ${TARGETCONFIG})\" "
     GENKERNEL_OPTS+="--kerneldir=\"$(dirname ${TARGETCONFIG})\" "
     GENKERNEL_OPTS+="--kernel-localversion=UNSET "
@@ -1910,15 +1911,6 @@ unpack_initramfs() {
     (cd "${INITRAMFSDIR}"; cpio --extract --file="${UNCOMPRESSEDINITRAMFS}")
 }
 modify_initramfs() {
-#    if [ -n "${LUKSKEYFILE}" ]; then
-#        if [ ! -x "${GPG1PATHFROM}" ]; then
-#            alertshow "No static gpg found, aborting"
-#            cleanup_and_exit_with_code 1
-#        fi
-#        show "Copying static gpg program into initramfs..."
-#        cp ${VERBOSITYFLAG} "${GPG1PATHFROM}" "${GPG1PATHTO}"
-#    fi
-
     if ((USINGMODULES==1)); then
         show "Copying contents of ${MODPROBEDIR} directory into initramfs..."
         if [ "$(ls -A ${MODPROBEDIR})" ]; then
