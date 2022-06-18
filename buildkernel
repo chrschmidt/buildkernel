@@ -127,7 +127,7 @@ DEFAULTINITSYSTEM="systemd"
 INITSYSTEM="${DEFAULTINITSYSTEM}"
 # following variable is conformed on installation by ebuild
 # (to reflect setting of "plymouth" USE flag)
-USE_PLYMOUTH=true
+USE_PLYMOUTH=false
 VERBOSITYFLAG=""
 ASKFLAG=""
 ALERTFLAG=""
