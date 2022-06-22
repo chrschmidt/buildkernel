@@ -334,7 +334,7 @@ mount_and_remember() {
     local DEVPATH="${1}"
     local MOUNTPOINT="${2}"
     local TYPE=${3:-""}
-    
+
     if [[ "${ALLMOUNTS[${MOUNTPOINT}]+_}" ]]; then
         warning "Attempt to mount '${MOUNTPOINT}' more than once"
     else
@@ -1355,7 +1355,7 @@ make_key_file_location_expicit_if_necessary_and_wanted() {
             show "the value of EFIPARTUUID (the EFI system partition)."
             show "Now you have changed EFIPARTUUID, you must choose what to do"
             show "about the keyfile."
-            
+
             local -i DOEXIT=0
             declare -a KEYFILEMENU=("Keep keyfile in previous EFI system partition" \
                 "Move keyfile to new EFI system partition (retain implicit tracking)")
@@ -2054,7 +2054,7 @@ finalize_efi_partition_and_unmount_if_desired() {
     sync
     echo
     DOUNMOUNT=0
-    
+
     if ((ARG_UNMOUNTATEND==1)); then
         # this trumps everything else
         DOUNMOUNT=1
