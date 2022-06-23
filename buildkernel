@@ -902,15 +902,15 @@ show_gpg_keyfile_partitions() {
     if ((NUMGPGPARTS==0)); then
         show "No potential keyfile partitions found on your machine"
     else
-        printf "%3s %-36s %-10s %-3s %3s\n" "Num" "Partition UUID" "Path" "Use"
-        printf "%s\n" "--- ------------------------------------ ---------- ---"
+	echo "Num Use UUID                                 Path"
+	echo "--- --- ------------------------------------ -------------------------------"
         for I in "${!GPGUUIDS[@]}"; do
             local INUSE="[ ]"
             if [[ ${KEYFILEPARTUUID:-""} == "${GPGUUIDS[$I]}" ]]; then
                 INUSE="[*]"
             fi
-            printf "%2d) %-36s %-10s %3s\n" $((I+1)) "${GPGUUIDS[$I]}" \
-                "${ALLUUIDS[${GPGUUIDS[$I]}]}" "${INUSE}"
+            printf "%2d) %3s %-36s %-10s\n" $((I+1)) \
+		    "${INUSE}" "${GPGUUIDS[$I]}" "${ALLUUIDS[${GPGUUIDS[$I]}]}"
         done
     fi
     if [ -n "${LASTITEM}" ]; then
@@ -923,8 +923,8 @@ show_luks_partitions() {
     if ((NUMLUKSPARTS==0)); then
         die "No LUKS partitions found on your machine"
     else
-        printf "%3s %-36s %-10s %-3s %3s\n" "Num" "Partition UUID" "Path" "USB" "Use"
-        printf "%s\n" "--- ------------------------------------ ---------- --- ---"
+	echo "Num USB Use UUID                                 Path"
+	echo "--- --- --- ------------------------------------ -------------------------------"
         for I in "${!LUKSUUIDS[@]}"; do
             local ISUSB=" N "
             local INUSE="[ ]"
@@ -935,8 +935,8 @@ show_luks_partitions() {
             if [[ ${CRYPTPARTUUID:-""} == "${LUKSUUIDS[$I]}" ]]; then
                 INUSE="[*]"
             fi
-            printf "%2d) %-36s %-10s %-3s %3s\n" $((I+1)) "${LUKSUUIDS[$I]}" \
-                "${DEVNAME}" "${ISUSB}" "${INUSE}"
+            printf "%2d) %3s %3s %-36s %-10s\n" $((I+1)) \
+		   "${ISUSB}" "${INUSE}" "${LUKSUUIDS[$I]}" "${DEVNAME}" 
         done
     fi
     if [ -n "${LASTITEM}" ]; then
@@ -950,8 +950,8 @@ show_efi_system_partitions() {
     if ((NUMEFIPARTS==0)); then
         die "No EFI system partitions found on your machine"
     else
-        printf "%3s %-36s %-10s %-3s %-3s %3s\n" "Num" "Partition UUID" "Path" "USB" "Win" "Use"
-        printf "%s\n" "--- ------------------------------------ ---------- --- --- ---"
+	echo "Num USB Win Use UUID                                 Path"
+	echo "--- --- --- --- ------------------------------------ -------------------------------"
         for I in "${!EFIUUIDS[@]}"; do
             local ISUSB=" N "
             local INUSE="[ ]"
@@ -968,8 +968,8 @@ show_efi_system_partitions() {
             elif [[ "${HASWINBOOTLOADER[${EFIUUIDS[$I]}]-0}" == "1" ]]; then
                 ISWIN=" Y "
             fi
-            printf "%2d) %-36s %-10s %-3s %-3s %3s\n" $((I+1)) "${EFIUUIDS[$I]}" \
-                "${DEVNAME}" "${ISUSB}" "${ISWIN}" "${INUSE}"
+            printf "%2d) %3s %3s %3s %-36s %-30s\n" $((I+1)) \
+		   "${ISUSB}" "${ISWIN}" "${INUSE}" "${EFIUUIDS[$I]}" "${DEVNAME}"
         done
     fi
     if [ -n "${LASTITEM}" ]; then
@@ -2222,6 +2222,7 @@ handle_final_options() {
 suppress_colour_and_alert_if_output_not_to_a_terminal
 check_if_booted_under_efi
 load_all_devices
+
 source_etc_conf_file
 process_command_line_options "${@}"
 setup_build_directory
