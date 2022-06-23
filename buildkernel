@@ -132,9 +132,9 @@ PORTAGEINFO=""
 MAKE=""
 # following array variables set by load_all_devices function
 declare -A ALLUUIDS
-declare -a GPGUUIDS GPGPARTNAMES
-declare -a LUKSUUIDS LUKSPARTNAMES LUKSONUSBS
-declare -a EFIUUIDS EFIPARTNAMES EFIONUSBS
+declare -a GPGUUIDS
+declare -a LUKSUUIDS
+declare -a EFIUUIDS
 # following array variables set by find_all_efi_boot_entries
 # (held in boot index order, NOT boot order)
 declare -a EBOOTIDS EBOOTNAMES EBOOTPATHS EBOOTUUIDS
@@ -552,17 +552,13 @@ check_if_booted_under_efi() {
     fi
 }
 load_all_devices() {
-    # overwrites the variables LUKSUUIDS, LUKSPARTNAMES, LUKSONUSBS
-    #   GPGUUIDS, GPGPARTNAMES
-    #   EFIUUIDS, EFIPARTNAMES, EFIONUSBS
+    # overwrites the variables ALLUUIDS, EFIUUIDS, GPGUUIDS, LUKSUUIDS,
     #   ISUSBPART
     # we only look for non-LUKS partitions on attached USB devices
     # for GPG keys, and don't mount to check that the file is there
-    ALLUUIDS=()
-    EFIUUIDS=(); EFIPARTNAMES=(); EFIONUSBS=()
-    GPGUUIDS=(); GPGPARTNAMES=(); GPGDEVNAMES=(); GPGPARTNUMS=()
-    LUKSUUIDS=(); LUKSPARTNAMES=(); LUKSONUSBS=()
-    local NEXTDEV NEXTUUID NEXTPARTUUID NEXTFSTYPE NEXTONUSB I
+    ALLUUIDS=(); EFIUUIDS=(); GPGUUIDS=(); LUKSUUIDS=()
+    ISUSBPART=()
+    local NEXTDEV NEXTUUID NEXTPARTUUID NEXTFSTYPE
     shopt -s lastpipe
     lsblk -nlp -o NAME,FSTYPE,UUID,PARTUUID -E UUID |
         while read NEXTDEV NEXTFSTYPE NEXTUUID NEXTPARTUUID; do
@@ -573,42 +569,33 @@ load_all_devices() {
                 fi
                 if [[ $(readlink "/sys/class/block/${NEXTDEV:5}") =~ usb ]]; then
                     ISUSBPART["${NEXTDEV}"]="1"
-                    NEXTONUSB="1"
                     if [ ${NEXTFSTYPE} != crypto_LUKS ]; then
-                        GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}")
-                        GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTDEV}")
-                        if [ -n "${NEXTPARTUUID}" ]; then
-                            GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTPARTUUID}")
-                            GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTDEV}")
-                        fi
+			if [ -n "${NEXTPARTUUID}" ]; then
+                            GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}" "${NEXTPARTUUID}")
+			else
+                            GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}")
+			fi
                     fi
-                else
-                    NEXTONUSB="0"
                 fi
                 case ${NEXTFSTYPE} in
-                    vfat)
+                    vfat) # check for GPT "EFI System" magic UUID
                         if blkid -p "${NEXTDEV}" | grep -q c12a7328-f81f-11d2-ba4b-00a0c93ec93b; then
-                            EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTUUID}")
-                            EFIPARTNAMES=("${EFIPARTNAMES[@]:+${EFIPARTNAMES[@]}}" "${NEXTDEV}")
-                            EFIONUSBS=("${EFIONUSBS[@]:+${EFIONUSBS[@]}}" "${NEXTONUSB}")
-                            if [ -n "${NEXTPARTUUID}" ]; then
-                                EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTPARTUUID}")
-                                EFIPARTNAMES=("${EFIPARTNAMES[@]:+${EFIPARTNAMES[@]}}" "${NEXTDEV}")
-                                EFIONUSBS=("${EFIONUSBS[@]:+${EFIONUSBS[@]}}" "${NEXTONUSB}")
-                            fi
+			    if [ -n "${NEXTPARTUUID}" ]; then
+				EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTUUID}" "${NEXTPARTUUID}")
+			    else
+				EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTUUID}")
+			    fi
                         fi
                         ;;
                     crypto_LUKS)
-                        LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTUUID}")
-                        LUKSPARTNAMES=("${LUKSPARTNAMES[@]:+${LUKSPARTNAMES[@]}}" "${NEXTDEV}")
-                        LUKSONUSBS=("${LUKSONUSBS[@]:+${LUKSONUSBS[@]}}" "${NEXTONUSB}")
-                        if [ -n "${NEXTPARTUUID}" ]; then
-                            LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTPARTUUID}")
-                            LUKSPARTNAMES=("${LUKSPARTNAMES[@]:+${LUKSPARTNAMES[@]}}" "${NEXTDEV}")
-                            LUKSONUSBS=("${LUKSONUSBS[@]:+${LUKSONUSBS[@]}}" "${NEXTONUSB}")
-                        fi
+			if [ -n "${NEXTPARTUUID}" ]; then
+                            LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTUUID}" "${NEXTPARTUUID}")
+			else
+                            LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTUUID}")
+			fi
                         ;;
-                    *) ;;
+                    *)
+			;;
                 esac
             fi
         done
@@ -923,7 +910,7 @@ show_gpg_keyfile_partitions() {
                 INUSE="[*]"
             fi
             printf "%2d) %-36s %-10s %3s\n" $((I+1)) "${GPGUUIDS[$I]}" \
-                "${GPGPARTNAMES[$I]}" "${INUSE}"
+                "${ALLUUIDS[${GPGUUIDS[$I]}]}" "${INUSE}"
         done
     fi
     if [ -n "${LASTITEM}" ]; then
@@ -941,14 +928,15 @@ show_luks_partitions() {
         for I in "${!LUKSUUIDS[@]}"; do
             local ISUSB=" N "
             local INUSE="[ ]"
-            if ((${LUKSONUSBS[$I]}==1)); then
+	    local DEVNAME=${ALLUUIDS["${LUKSUUIDS[$I]}"]}
+            if [ ${ISUSBPART[${DEVNAME}]+xxx} ] ; then
                 ISUSB=" Y "
             fi
             if [[ ${CRYPTPARTUUID:-""} == "${LUKSUUIDS[$I]}" ]]; then
                 INUSE="[*]"
             fi
             printf "%2d) %-36s %-10s %-3s %3s\n" $((I+1)) "${LUKSUUIDS[$I]}" \
-                "${LUKSPARTNAMES[$I]}" "${ISUSB}" "${INUSE}"
+                "${DEVNAME}" "${ISUSB}" "${INUSE}"
         done
     fi
     if [ -n "${LASTITEM}" ]; then
@@ -957,6 +945,7 @@ show_luks_partitions() {
 }
 show_efi_system_partitions() {
     local LASTITEM=${1:-""}
+    local DEVNAME
     declare -i I=0 NUMEFIPARTS="${#EFIUUIDS[@]}"
     if ((NUMEFIPARTS==0)); then
         die "No EFI system partitions found on your machine"
@@ -967,20 +956,20 @@ show_efi_system_partitions() {
             local ISUSB=" N "
             local INUSE="[ ]"
             local ISWIN=" N "
-            local NEXTUUID="${EFIUUIDS[$I]}"
-            if ((${EFIONUSBS[$I]}==1)); then
+	    local DEVNAME=${ALLUUIDS[${EFIUUIDS[$I]}]}
+            if [ ${ISUSBPART[${DEVNAME}]+xxx} ] ; then
                 ISUSB=" Y "
             fi
-            if [[ ${EFIPARTUUID:-""} == "${NEXTUUID}" ]]; then
+            if [[ ${EFIPARTUUID:-""} == "${EFIUUIDS[$I]}" ]]; then
                 INUSE="[*]"
             fi
             if ((USINGEFI==0)); then
                 ISWIN="???"
-            elif [[ "${HASWINBOOTLOADER[${NEXTUUID}]-0}" == "1" ]]; then
+            elif [[ "${HASWINBOOTLOADER[${EFIUUIDS[$I]}]-0}" == "1" ]]; then
                 ISWIN=" Y "
             fi
             printf "%2d) %-36s %-10s %-3s %-3s %3s\n" $((I+1)) "${EFIUUIDS[$I]}" \
-                "${EFIPARTNAMES[$I]}" "${ISUSB}" "${ISWIN}" "${INUSE}"
+                "${DEVNAME}" "${ISUSB}" "${ISWIN}" "${INUSE}"
         done
     fi
     if [ -n "${LASTITEM}" ]; then
