@@ -49,7 +49,6 @@ EFIBOOTDIR="${DEFAULTEFIBOOTDIR}"
 FULLEFIBOOTDIR="${EFIROOTDIR}${EFIBOOTDIR}"
 EFICONFIGFILE="config"
 OLDSUFFIX=".old"
-PARTUUIDDEVDIR="/dev/disk/by-partuuid"
 DISKIDDEVDIR="/dev/disk/by-id"
 IDDEVDIR="/dev/disk/by-id"
 DEFAULTLUKSKEYFILE="luks-key.gpg"
@@ -133,14 +132,11 @@ ASKFLAG=""
 ALERTFLAG=""
 PORTAGEINFO=""
 MAKE=""
-# following array variables set by find_all_gpg_keyfile_partitions function
-declare -a GPGUUIDS GPGPARTNAMES GPGDEVNAMES GPGPARTNUMS
-# following array variables set by find_all_luks_partitions function
-declare -a LUKSUUIDS LUKSPARTNAMES LUKSDEVNAMES LUKSPARTNUMS
-declare -a LUKSONUSBS
-# following array variables set by find_all_efi_system_partitions function
-declare -a EFIUUIDS EFIPARTNAMES EFIDEVNAMES EFIPARTNUMS
-declare -a EFIONUSBS
+# following array variables set by load_all_devices function
+declare -A ALLUUIDS
+declare -a GPGUUIDS GPGPARTNAMES
+declare -a LUKSUUIDS LUKSPARTNAMES LUKSONUSBS
+declare -a EFIUUIDS EFIPARTNAMES EFIONUSBS
 # following array variables set by find_all_efi_boot_entries
 # (held in boot index order, NOT boot order)
 declare -a EBOOTIDS EBOOTNAMES EBOOTPATHS EBOOTUUIDS
@@ -152,7 +148,7 @@ declare -A HASWINBOOTLOADER
 declare -A EBOOTIDTOINDEX
 # used to unwind mountpoints on failure
 declare -A ALLMOUNTS
-# has a '1' entry for all USB partitions; set by find_all_usb_partitions
+# has a '1' entry for all USB partitions; set by load_all_devices
 declare -A ISUSBPART
 # used by menu-driven config setting
 declare -i CONFIGDIRTY=0
@@ -385,14 +381,14 @@ check_is_luks_volume() {
     cryptsetup isLuks "${1}" || die "Path '${1}' is not a LUKS volume"
 }
 partuuid_is_on_usb_device() {
-    local CANONPART="$(readlink --canonicalize "${PARTUUIDDEVDIR}/${1,,}")"
+    local CANONPART="${ALLUUIDS[${1}]}"
     if [[ "${ISUSBPART[${CANONPART}]-0}" == "1" ]]; then
         return 0
     fi
     return 1
 }
 check_partuuid_exists() {
-    if [ ! -h "${PARTUUIDDEVDIR}/${1}" ]; then
+    if [ -z "${ALLUUIDS[${1}]}" ]; then 
         die "Partition with UUID '${1}' does not exist"
     fi
 }
@@ -490,9 +486,9 @@ setup_final_variables() {
         warning "without the plymouth use flag set - ignoring."
         PLYMOUTHTHEME=""
     fi
-    EFIPATHMAP="${PARTUUIDDEVDIR}/${EFIPARTUUID}"
+    EFIPATHMAP="${ALLUUIDS[${EFIPARTUUID}]}"
     if ((CRYPTPATHMAPFORCED==0)); then
-        CRYPTPATHMAP="${PARTUUIDDEVDIR}/${CRYPTPARTUUID}"
+        CRYPTPATHMAP="${ALLUUIDS[${CRYPTPARTUUID}]}"
     fi # otherwise, leave it as set
     # check if the user has specified an OpenRC init; if not, assume systemd
     if [[ "${INITSYSTEM}" == "openrc" ]]; then
@@ -505,7 +501,7 @@ setup_final_variables() {
     # assume keyfile is also on the EFI system partition, unless KEYFILEPARTUUID
     # has been set explicitly in buildkernel.conf
     KEYFILEPARTUUID="${KEYFILEPARTUUID:-${EFIPARTUUID}}"
-    KEYFILEPATHMAP="${PARTUUIDDEVDIR}/${KEYFILEPARTUUID}"
+    KEYFILEPATHMAP="${ALLUUIDS[${KEYFILEPARTUUID}]}"
     # get the real root filesystem type if not specified
     # falling back to ext4 if the findmnt-based lookup fails
     if [[ ! -v CMDLINE_ROOTFSTYPE ]]; then
@@ -557,117 +553,67 @@ check_if_booted_under_efi() {
         USINGEFI=0
     fi
 }
-find_all_usb_partitions() {
-    # overwrites ISUSBPART
-    local U ALLU="${!ISUSBPART[@]}"
-    for U in ${ALLU}; do
-        unset -v "ISUSBPART[${U}]"
-    done
-    local NEXTID
-    for NEXTID in "${DISKIDDEVDIR}/usb-"*"-part"*[[:digit:]]; do
-        if [ -e "${NEXTID}" ]; then
-            # remember this
-            local NEXTCANONPART="$(readlink --canonicalize "${NEXTID}")"
-            ISUSBPART["${NEXTCANONPART}"]="1"
-        fi
-    done
-}
-find_all_gpg_keyfile_partitions() {
-    # overwrites the variables GPGUUIDS, GPGPARTNAMES, GPGDEVNAMES and
-    # GPGPARTNUMS
+load_all_devices() {
+    # overwrites the variables LUKSUUIDS, LUKSPARTNAMES, LUKSONUSBS
+    #   GPGUUIDS, GPGPARTNAMES
+    #   EFIUUIDS, EFIPARTNAMES, EFIONUSBS
+    #   ISUSBPART
     # we only look for non-LUKS partitions on attached USB devices
-    # we don't mount to check that the file is there
+    # for GPG keys, and don't mount to check that the file is there
+    ALLUUIDS=()
+    EFIUUIDS=(); EFIPARTNAMES=(); EFIONUSBS=()
     GPGUUIDS=(); GPGPARTNAMES=(); GPGDEVNAMES=(); GPGPARTNUMS=()
-    local NEXTPART
-    for NEXTPART in "${PARTUUIDDEVDIR}"/*; do
-        if [ -e "${NEXTPART}" ]; then
-            if ! cryptsetup isLuks "${NEXTPART}"; then
-                NEXTPART="${NEXTPART,,}"
-                local NEXTUUID="${NEXTPART##*/}"
-                local NEXTPARTNAME="$(readlink --canonicalize "${NEXTPART}")" # e.g. /dev/sda3
-                local NEXTDEVNAME="${NEXTPARTNAME%%[[:digit:]]*}"              # e.g. /dev/sda
-                local NEXTPARTNUM="${NEXTPARTNAME##*[^[:digit:]]}"              # e.g. 3
-                if partuuid_is_on_usb_device "${NEXTUUID}"; then
-                    # assign results (Bash treats arrays as unset if not assigned a value)
-                    GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}")
-                    GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTPARTNAME}")
-                    GPGDEVNAMES=("${GPGDEVNAMES[@]:+${GPGDEVNAMES[@]}}" "${NEXTDEVNAME}")
-                    GPGPARTNUMS=("${GPGPARTNUMS[@]:+${GPGPARTNUMS[@]}}" "${NEXTPARTNUM}")
+    LUKSUUIDS=(); LUKSPARTNAMES=(); LUKSONUSBS=()
+    local NEXTDEV NEXTUUID NEXTPARTUUID NEXTFSTYPE NEXTONUSB I
+    shopt -s lastpipe
+    lsblk -nlp -o NAME,FSTYPE,UUID,PARTUUID -E UUID |
+        while read NEXTDEV NEXTFSTYPE NEXTUUID NEXTPARTUUID; do
+            if [ -n "${NEXTFSTYPE}" ]; then
+                ALLUUIDS[${NEXTUUID}]="${NEXTDEV}"
+                if [ -n "${NEXTPARTUUID}" ]; then
+                    ALLUUIDS[${NEXTPARTUUID}]="${NEXTDEV}"
                 fi
-            fi
-        fi
-    done
-}
-find_all_luks_partitions() {
-    # overwrites the variables LUKSUUIDS, LUKSPARTNAMES, LUKSDEVNAMES, 
-    # LUKSPARTNUMS and LUKSONUSBS
-    LUKSUUIDS=(); LUKSPARTNAMES=(); LUKSPARTNAMES=(); LUKSDEVNAMES=()
-    LUKSPARTNUMS=(); LUKSONUSBS=()
-    local NEXTPART
-    for NEXTPART in "${PARTUUIDDEVDIR}"/*; do
-        if [ -e "${NEXTPART}" ]; then
-            if cryptsetup isLuks "${NEXTPART}"; then
-                NEXTPART="${NEXTPART,,}"
-                local NEXTUUID="${NEXTPART##*/}"
-                local NEXTPARTNAME="$(readlink --canonicalize "${NEXTPART}")" # e.g. /dev/sda3
-                # nvme devices have paths of form e.g. /dev/nvme0n1p1
-                # mmc devices have paths of form e.g. /dev/mmcblk0p1
-                # standard drives have form e.g. /dev/sda3
-                if [[ ${NEXTPARTNAME} =~ ^/dev/.*[[:digit:]]p[[:digit:]]+$ ]]; then
-                    local NEXTDEVNAME="${NEXTPARTNAME%%p[[:digit:]]*}"        # e.g. /dev/nvme0n1, /dev/mmcblk0
-                else
-                    local NEXTDEVNAME="${NEXTPARTNAME%%[[:digit:]]*}"         # e.g. /dev/sda
-                fi
-                local NEXTPARTNUM="${NEXTPARTNAME##*[^[:digit:]]}"            # e.g. 3
-                local NEXTONUSB="0"
-                if partuuid_is_on_usb_device "${NEXTUUID}"; then
+                if [[ $(readlink "/sys/class/block/${NEXTDEV:5}") =~ usb ]]; then
+                    ISUSBPART["${NEXTDEV}"]="1"
                     NEXTONUSB="1"
+                    if [ ${NEXTFSTYPE} != crypto_LUKS ]; then
+                        GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}")
+                        GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTDEV}")
+                        if [ -n "${NEXTPARTUUID}" ]; then
+                            GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTPARTUUID}")
+                            GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTDEV}")
+                        fi
+                    fi
+                else
+                    NEXTONUSB="0"
                 fi
-                # assign results (Bash treats arrays as unset if not assigned a value)
-                LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTUUID}")
-                LUKSPARTNAMES=("${LUKSPARTNAMES[@]:+${LUKSPARTNAMES[@]}}" "${NEXTPARTNAME}")
-                LUKSDEVNAMES=("${LUKSDEVNAMES[@]:+${LUKSDEVNAMES[@]}}" "${NEXTDEVNAME}")
-                LUKSPARTNUMS=("${LUKSPARTNUMS[@]:+${LUKSPARTNUMS[@]}}" "${NEXTPARTNUM}")
-                LUKSONUSBS=("${LUKSONUSBS[@]:+${LUKSONUSBS[@]}}" "${NEXTONUSB}")
+                case ${NEXTFSTYPE} in
+                    vfat)
+                        if blkid -p "${NEXTDEV}" | grep -q c12a7328-f81f-11d2-ba4b-00a0c93ec93b; then
+                            EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTUUID}")
+                            EFIPARTNAMES=("${EFIPARTNAMES[@]:+${EFIPARTNAMES[@]}}" "${NEXTDEV}")
+                            EFIONUSBS=("${EFIONUSBS[@]:+${EFIONUSBS[@]}}" "${NEXTONUSB}")
+                            if [ -n "${NEXTPARTUUID}" ]; then
+                                EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTPARTUUID}")
+                                EFIPARTNAMES=("${EFIPARTNAMES[@]:+${EFIPARTNAMES[@]}}" "${NEXTDEV}")
+                                EFIONUSBS=("${EFIONUSBS[@]:+${EFIONUSBS[@]}}" "${NEXTONUSB}")
+                            fi
+                        fi
+                        ;;
+                    crypto_LUKS)
+                        LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTUUID}")
+                        LUKSPARTNAMES=("${LUKSPARTNAMES[@]:+${LUKSPARTNAMES[@]}}" "${NEXTDEV}")
+                        LUKSONUSBS=("${LUKSONUSBS[@]:+${LUKSONUSBS[@]}}" "${NEXTONUSB}")
+                        if [ -n "${NEXTPARTUUID}" ]; then
+                            LUKSUUIDS=("${LUKSUUIDS[@]:+${LUKSUUIDS[@]}}" "${NEXTPARTUUID}")
+                            LUKSPARTNAMES=("${LUKSPARTNAMES[@]:+${LUKSPARTNAMES[@]}}" "${NEXTDEV}")
+                            LUKSONUSBS=("${LUKSONUSBS[@]:+${LUKSONUSBS[@]}}" "${NEXTONUSB}")
+                        fi
+                        ;;
+                    *) ;;
+                esac
             fi
-        fi
-    done
-
-}
-find_all_efi_system_partitions() {
-    # overwrites the variables EFIUUIDS, EFIPARTNAMES, EFIDEVNAMES, 
-    # EFIPARTNUMS and EFIONUSBS
-    EFIUUIDS=(); EFIPARTNAMES=(); EFIPARTNAMES=(); EFIDEVNAMES=()
-    EFIPARTNUMS=(); EFIONUSBS=()
-    local NEXTPART
-    for NEXTPART in "${PARTUUIDDEVDIR}"/*; do
-        if [ -e "${NEXTPART}" ]; then
-            NEXTPART="${NEXTPART,,}"
-            local NEXTUUID="${NEXTPART##*/}"
-            local NEXTPARTNAME="$(readlink --canonicalize "${NEXTPART}")" # e.g. /dev/sda3
-            # nvme devices have paths of form e.g. /dev/nvme0n1p1
-            # mmc devices have paths of form e.g. /dev/mmcblk0p1
-            # standard drives have form e.g. /dev/sda3
-            if [[ ${NEXTPARTNAME} =~ ^/dev/.*[[:digit:]]p[[:digit:]]+$ ]]; then
-                local NEXTDEVNAME="${NEXTPARTNAME%%p[[:digit:]]*}"        # e.g. /dev/nvme0n1, /dev/mmcblk0
-            else
-                local NEXTDEVNAME="${NEXTPARTNAME%%[[:digit:]]*}"         # e.g. /dev/sda
-            fi
-            local NEXTPARTNUM="${NEXTPARTNAME##*[^[:digit:]]}"            # e.g. 3
-            local NEXTONUSB="0"
-            if partuuid_is_on_usb_device "${NEXTUUID}"; then
-                NEXTONUSB="1"
-            fi
-            if grep -qi 'EFI System' <(sgdisk --info "${NEXTPARTNUM}" "${NEXTDEVNAME}"); then
-                # assign results (Bash treats arrays as unset if not assigned a value)
-                EFIUUIDS=("${EFIUUIDS[@]:+${EFIUUIDS[@]}}" "${NEXTUUID}")
-                EFIPARTNAMES=("${EFIPARTNAMES[@]:+${EFIPARTNAMES[@]}}" "${NEXTPARTNAME}")
-                EFIDEVNAMES=("${EFIDEVNAMES[@]:+${EFIDEVNAMES[@]}}" "${NEXTDEVNAME}")
-                EFIPARTNUMS=("${EFIPARTNUMS[@]:+${EFIPARTNUMS[@]}}" "${NEXTPARTNUM}")
-                EFIONUSBS=("${EFIONUSBS[@]:+${EFIONUSBS[@]}}" "${NEXTONUSB}")
-            fi
-        fi
-    done
+        done
 }
 find_all_efi_boot_entries() {
     # overwrites the variables EBOOTIDS EBOOTNAMES EBOOTPATHS EBOOTUUIDS
@@ -762,9 +708,6 @@ warn_if_buildkernel_config_incomplete() {
     fi
 }
 interactively_set_buildkernel_config() {
-    find_all_gpg_keyfile_partitions
-    find_all_luks_partitions
-    find_all_efi_system_partitions
     find_all_efi_boot_entries
     archive_current_config_variables
     declare -i DOSAVE=0 DOEXIT=0
@@ -1399,14 +1342,13 @@ copy_file_from_partition_to_partition() {
     declare -i DIDMOUNTFROM=0 DIDMOUNTTO=0
     # both of these UUIDs need to be in the /dev/disk/by-partuuid list
     # or it's no go
-    local FROMEFIPARTPATH="${PARTUUIDDEVDIR}/${FROMPARTUUID}"
-    local TOEFIPARTPATH="${PARTUUIDDEVDIR}/${TOPARTUUID}"
-    if [[ ! -e "${FROMEFIPARTPATH}" || ! -e "${TOEFIPARTPATH}" ]]; then
+    local FROMPARTNAME="${ALLUUIDS[${FROMPARTUUID}]}"
+    local TOPARTNAME="${ALLUUIDS[${TOPARTUUID}]}"
+    if [[ -z "${FROMPARTNAME}" || -z "${TOPARTNAME}" ]]; then
         warning "${ONERRORTEXT}"
         return 0
     fi
-    local FROMPARTNAME="$(readlink --canonicalize "${FROMEFIPARTPATH}")" # e.g. /dev/sda3
-    local TOPARTNAME="$(readlink --canonicalize "${TOEFIPARTPATH}")" # e.g. /dev/sdb3
+
     local ALLMOUNTEDPARTS="$(df -P)"
     local FROMMOUNT="$(grep "^${FROMPARTNAME}" <<<"${ALLMOUNTEDPARTS}" | perl -pe 's/^(\S+\s+){5}//')" 
     local TOMOUNT="$(grep "^${TOPARTNAME}" <<<"${ALLMOUNTEDPARTS}" | perl -pe 's/^(\S+\s+){5}//')"
@@ -1508,8 +1450,8 @@ conform_efi_boot_order_if_possible() {
     declare -i NEWBOOTENTRYNEEDED=1
     local SMBOOTPATH="${EFIBOOTDIR}/${EFIBOOTFILE}"
     # locate the EFIPARTUUID, if possible
-    local EFIPARTPATH="${PARTUUIDDEVDIR}/${EFIPARTUUID}"
-    if [ ! -e "${EFIPARTPATH}" ]; then
+    local PARTNAME="${ALLUUIDS[${EFIPARTUUID}]}"
+    if [ -z "${PARTNAME}" ]; then
         warning "EFIPARTUUID (${EFIPARTUUID}) not found on system"
         warning "Cannot conform EFI boot list"
         warning "Ensure EFIPARTUUID is correct, USB device (if appropriate) is"
@@ -1519,7 +1461,6 @@ conform_efi_boot_order_if_possible() {
     fi
     # ok we do know about this partition, so find out its device path and
     # partition number, as we'll need this to invoke efibootmgr
-    local PARTNAME="$(readlink --canonicalize "${EFIPARTPATH}")" # e.g. /dev/sda3
     local DEVNAME
     # nvme devices have paths of form e.g. /dev/nvme0n1p1
     # mmc devices have paths of form e.g. /dev/mmcblk0p1
@@ -2293,7 +2234,7 @@ handle_final_options() {
 # *************** start of script proper ***************
 suppress_colour_and_alert_if_output_not_to_a_terminal
 check_if_booted_under_efi
-find_all_usb_partitions
+load_all_devices
 source_etc_conf_file
 process_command_line_options "${@}"
 setup_build_directory
