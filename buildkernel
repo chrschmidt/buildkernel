@@ -31,7 +31,7 @@ shopt -s nullglob
 # ********************** variables ********************* 
 PROGNAME="$(basename "${0}")"
 CONFFILE="/etc/${PROGNAME}.conf"
-VERSION="1.0.37"
+VERSION="1.2.0"
 ETCPROFILE="/etc/profile"
 DEFAULTEFIBOOTFILE="bootx64.efi"
 EFIBOOTFILE="${DEFAULTEFIBOOTFILE}"
@@ -132,6 +132,8 @@ PORTAGEINFO=""
 MAKE=""
 # following array variables set by load_all_devices function
 declare -A ALLUUIDS
+declare -A FSUUIDS
+declare -A PARTUUIDS
 declare -a GPGUUIDS
 declare -a LUKSUUIDS
 declare -a EFIUUIDS
@@ -376,7 +378,8 @@ restore_efivarfs_mount_state() {
     fi
 }
 check_is_luks_volume() {
-    cryptsetup isLuks "${1}" || die "Path '${1}' is not a LUKS volume"
+    local candidate=$(findfs "${1}")
+    cryptsetup isLuks "${candidate}" || die "Path '${1}' is not a LUKS volume"
 }
 partuuid_is_on_usb_device() {
     local CANONPART="${ALLUUIDS[${1}]}"
@@ -484,10 +487,17 @@ setup_final_variables() {
         warning "without the plymouth use flag set - ignoring."
         PLYMOUTHTHEME=""
     fi
-    EFIPATHMAP="${ALLUUIDS[${EFIPARTUUID}]}"
+
+    EFIPATHMAP="PARTUUID=${EFIPARTUUID}"
+
     if ((CRYPTPATHMAPFORCED==0)); then
-        CRYPTPATHMAP="${ALLUUIDS[${CRYPTPARTUUID}]}"
+        if [ -z ${PARTUUIDS[${CRYPTPARTUUID}]+xxx} ]; then
+            CRYPTPATHMAP="UUID=${CRYPTPARTUUID}"
+        else
+            CRYPTPATHMAP="PARTUUID=${CRYPTPARTUUID}"
+        fi
     fi # otherwise, leave it as set
+
     # check if the user has specified an OpenRC init; if not, assume systemd
     if [[ "${INITSYSTEM}" == "openrc" ]]; then
         # need a different path for the init executable
@@ -499,7 +509,11 @@ setup_final_variables() {
     # assume keyfile is also on the EFI system partition, unless KEYFILEPARTUUID
     # has been set explicitly in buildkernel.conf
     KEYFILEPARTUUID="${KEYFILEPARTUUID:-${EFIPARTUUID}}"
-    KEYFILEPATHMAP="${ALLUUIDS[${KEYFILEPARTUUID}]}"
+    if [ -z ${PARTUUIDS[${KEYFILEPARTUUID}]+xxx} ]; then
+        KEYFILEPATHMAP="UUID=${KEYFILEPARTUUID}"
+    else
+        KEYFILEPATHMAP="PARTUUID=${KEYFILEPARTUUID}"
+    fi
     # get the real root filesystem type if not specified
     # falling back to ext4 if the findmnt-based lookup fails
     if [[ ! -v CMDLINE_ROOTFSTYPE ]]; then
@@ -552,11 +566,12 @@ check_if_booted_under_efi() {
     fi
 }
 load_all_devices() {
-    # overwrites the variables ALLUUIDS, EFIUUIDS, GPGUUIDS, LUKSUUIDS,
-    #   ISUSBPART
+    # overwrites the variables ALLUUIDS, FSUUIDS, PARTUUIDS
+    # EFIUUIDS, GPGUUIDS, LUKSUUIDS, ISUSBPART
     # we only look for non-LUKS partitions on attached USB devices
     # for GPG keys, and don't mount to check that the file is there
-    ALLUUIDS=(); EFIUUIDS=(); GPGUUIDS=(); LUKSUUIDS=()
+    ALLUUIDS=(); FSUUIDS=(); PARTUUIDS=();
+    EFIUUIDS=(); GPGUUIDS=(); LUKSUUIDS=()
     ISUSBPART=()
     local NEXTDEV NEXTUUID NEXTPARTUUID NEXTFSTYPE
     shopt -s lastpipe
@@ -564,8 +579,10 @@ load_all_devices() {
         while read NEXTDEV NEXTFSTYPE NEXTUUID NEXTPARTUUID; do
             if [ -n "${NEXTFSTYPE}" ]; then
                 ALLUUIDS[${NEXTUUID}]="${NEXTDEV}"
+                FSUUIDS[${NEXTUUID}]="1"
                 if [ -n "${NEXTPARTUUID}" ]; then
                     ALLUUIDS[${NEXTPARTUUID}]="${NEXTDEV}"
+                    PARTUUIDS[${NEXTPARTUUID}]="1"
                 fi
                 if [[ $(readlink "/sys/class/block/${NEXTDEV:5}") =~ usb ]]; then
                     ISUSBPART["${NEXTDEV}"]="1"
@@ -2222,7 +2239,6 @@ handle_final_options() {
 suppress_colour_and_alert_if_output_not_to_a_terminal
 check_if_booted_under_efi
 load_all_devices
-
 source_etc_conf_file
 process_command_line_options "${@}"
 setup_build_directory
