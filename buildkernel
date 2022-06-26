@@ -378,8 +378,8 @@ restore_efivarfs_mount_state() {
     fi
 }
 check_is_luks_volume() {
-    local candidate=$(findfs "${1}")
-    cryptsetup isLuks "${candidate}" || die "Path '${1}' is not a LUKS volume"
+    local CANONPART=$(findfs "${1}")
+    cryptsetup isLuks "${CANONPART}" || die "Path '${1}' is not a LUKS volume"
 }
 partuuid_is_on_usb_device() {
     local CANONPART="${ALLUUIDS[${1}]}"
