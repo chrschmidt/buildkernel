@@ -389,7 +389,7 @@ partuuid_is_on_usb_device() {
     return 1
 }
 check_partuuid_exists() {
-    if [ -z "${ALLUUIDS[${1}]}" ]; then 
+    if [ -z "${ALLUUIDS[${1}]+test}" ]; then
         die "Partition with UUID '${1}' does not exist"
     fi
 }
@@ -577,7 +577,7 @@ load_all_devices() {
     shopt -s lastpipe
     lsblk -nlp -o NAME,FSTYPE,UUID,PARTUUID -E UUID |
         while read NEXTDEV NEXTFSTYPE NEXTUUID NEXTPARTUUID; do
-            if [ -n "${NEXTFSTYPE}" ]; then
+            if [ -n "${NEXTFSTYPE}" -a -n "${NEXTUUID}" ]; then
                 ALLUUIDS[${NEXTUUID}]="${NEXTDEV}"
                 FSUUIDS[${NEXTUUID}]="1"
                 if [ -n "${NEXTPARTUUID}" ]; then
