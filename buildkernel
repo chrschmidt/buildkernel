@@ -575,7 +575,12 @@ load_all_devices() {
     ISUSBPART=()
     local NEXTDEV NEXTUUID NEXTPARTUUID NEXTFSTYPE
     shopt -s lastpipe
-    lsblk -nlp -o NAME,FSTYPE,UUID,PARTUUID -E UUID |
+    blkid -D | while read A; do
+      echo $A | grep -oP '^[^:]+' | tr -d '\012' && echo -ne "\t" &&
+      echo $A | grep -oP '(?<= TYPE=")[^"]+' | tr -d '\012' && echo -ne "\t" &&
+      echo $A | grep -oP '(?<= UUID=")[^"]+' | tr -d '\012' && echo -ne "\t" &&
+      echo $A | grep -oP '(?<= PARTUUID=")[^"]+' | tr -d '\012' && echo ""
+    done |
         while read NEXTDEV NEXTFSTYPE NEXTUUID NEXTPARTUUID; do
             if [ -n "${NEXTFSTYPE}" -a -n "${NEXTUUID}" ]; then
                 ALLUUIDS[${NEXTUUID}]="${NEXTDEV}"
